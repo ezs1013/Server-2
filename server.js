@@ -186,14 +186,17 @@ app.post('/api/user/upgrade', function(req, res) {
 
 // ===================== REDEEM CODE =====================
 app.post('/api/redeem/create', function(req, res) {
-    var { feature, count, owner_key } = req.body;
+    var owner_key = req.body.owner_key;
     if (owner_key !== OWNER_KEY) return res.status(403).json({ error: 'Bukan Owner!' });
-    if (!feature) return res.status(400).json({ error: 'feature wajib' });
 
+    // Support: features (array) atau feature (string lama)
+    var features = req.body.features || (req.body.feature ? [req.body.feature] : null);
+    if (!features || features.length === 0) return res.status(400).json({ error: 'features wajib' });
+
+    var count = Math.min(parseInt(req.body.count) || 1, 50);
     var codes = loadJson(CODES_FILE, {});
-    count = Math.min(parseInt(count) || 1, 50);
-
     var generated = [];
+
     for (var i = 0; i < count; i++) {
         var letters = 'abcdefghijklmnopqrstuvwxyz';
         var r5 = '', r5n = '';
@@ -202,8 +205,9 @@ app.post('/api/redeem/create', function(req, res) {
         var now = new Date();
         var dateStr = now.getDate()+'/'+(now.getMonth()+1)+'/'+String(now.getFullYear()).slice(2);
         var code = r5 + '-' + r5n + '-' + dateStr;
-        codes[code] = { feature, used: false, usedBy: null, createdAt: dateStr };
-        generated.push({ code, feature });
+        // Simpan semua fitur dalam array
+        codes[code] = { features: features, used: false, usedBy: null, createdAt: dateStr };
+        generated.push({ code, features: features });
     }
     saveJson(CODES_FILE, codes);
     res.json({ success: true, codes: generated });
@@ -216,7 +220,7 @@ app.get('/api/redeem/list', function(req, res) {
 });
 
 app.post('/api/redeem/use', async function(req, res) {
-    var { code, email } = req.body;
+    var code = req.body.code, email = req.body.email;
     if (!code || !email) return res.status(400).json({ error: 'code dan email wajib' });
 
     var codes = loadJson(CODES_FILE, {});
@@ -229,23 +233,31 @@ app.post('/api/redeem/use', async function(req, res) {
     var user = users[email];
     if (!user) return res.status(404).json({ valid: false, error: 'User tidak ditemukan!' });
 
-    var feature = entry.feature;
-    codes[code].used   = true;
-    codes[code].usedBy = email;
-    saveJson(CODES_FILE, codes);
+    // Support features array atau feature string lama
+    var features = entry.features || (entry.feature ? [entry.feature] : []);
 
-    if (feature.startsWith('upgrade_')) {
-        var newType = feature.replace('upgrade_','');
-        user.accountType = newType;
-        var newFeats = defaultFeatures(newType);
-        newFeats.forEach(function(f) {
-            if (!user.unlockedFeatures.includes(f)) user.unlockedFeatures.push(f);
-        });
-    } else {
-        if (!user.unlockedFeatures.includes(feature)) user.unlockedFeatures.push(feature);
-    }
+    features.forEach(function(feature) {
+        if (feature.startsWith('upgrade_')) {
+            var newType = feature.replace('upgrade_','');
+            // Hanya upgrade kalau lebih tinggi
+            var typeOrder = ['free','premium_v1','premium_v2','premium_v3','owner'];
+            var curIdx = typeOrder.indexOf(user.accountType);
+            var newIdx = typeOrder.indexOf(newType);
+            if (newIdx > curIdx) {
+                user.accountType = newType;
+                // Tambah token limit saja, fitur tetap sama (harus redeem terpisah)
+            }
+        } else {
+            if (!user.unlockedFeatures.includes(feature)) user.unlockedFeatures.push(feature);
+        }
+    });
+
+    // Hapus kode yang sudah dipakai
+    delete codes[code];
+    saveJson(CODES_FILE, codes);
     saveJson(USERS_FILE, users);
-    res.json({ valid: true, feature, user: sanitize(user), message: 'Kode berhasil digunakan!' });
+
+    res.json({ valid: true, features: features, user: sanitize(user), message: 'Kode berhasil digunakan!' });
 });
 
 // ===================== UTIL =====================
