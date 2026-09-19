@@ -322,31 +322,28 @@ app.post('/api/redeem/use', async function(req, res) {
 // ===================== OWNER: Buat kode saldo via menu akun =====================
 app.post('/api/owner/create-balance-code', function(req, res) {
     var users = loadJson(USERS_FILE, {});
-    var { email, password, amount, count } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'email dan password wajib' });
+    var { email, amount, count } = req.body;
+    if (!email) return res.status(400).json({ error: 'email wajib' });
     var user = users[email];
     if (!user || user.accountType !== 'owner')
         return res.status(403).json({ error: 'Bukan Owner!' });
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Nominal wajib' });
 
-    bcrypt.compare(password, user.password, function(err, ok) {
-        if (!ok) return res.status(401).json({ error: 'Password salah!' });
-        if (!amount || amount <= 0) return res.status(400).json({ error: 'Nominal wajib' });
-        var n     = Math.min(parseInt(count)||1, 100);
-        var codes = loadJson(BAL_CODES, {});
-        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        var generated = [];
-        for (var i = 0; i < n; i++) {
-            var code = 'SAL-';
-            for (var j = 0; j < 12; j++) {
-                if (j === 4 || j === 8) code += '-';
-                code += chars[Math.floor(Math.random()*chars.length)];
-            }
-            codes[code] = { amount:parseInt(amount), used:false, usedBy:null, createdAt:new Date().toISOString() };
-            generated.push({ code, amount:parseInt(amount) });
+    var n     = Math.min(parseInt(count)||1, 100);
+    var codes = loadJson(BAL_CODES, {});  // Append ke kode yang sudah ada
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    var generated = [];
+    for (var i = 0; i < n; i++) {
+        var code = 'SAL-';
+        for (var j = 0; j < 12; j++) {
+            if (j === 4 || j === 8) code += '-';
+            code += chars[Math.floor(Math.random()*chars.length)];
         }
-        saveJson(BAL_CODES, codes);
-        res.json({ success:true, codes:generated });
-    });
+        codes[code] = { amount:parseInt(amount), used:false, usedBy:null, createdAt:new Date().toISOString() };
+        generated.push({ code, amount:parseInt(amount) });
+    }
+    saveJson(BAL_CODES, codes);
+    res.json({ success:true, codes:generated });
 });
 
 // ===================== UTIL =====================
