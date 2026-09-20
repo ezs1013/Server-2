@@ -170,6 +170,21 @@ app.post('/api/balance/create-code', function(req, res) {
     res.json({ success: true, codes: generated });
 });
 
+
+// List kode saldo milik user tertentu
+app.get('/api/balance/codes/user', function(req, res) {
+    var { email } = req.query;
+    if (!email) return res.status(400).json({ error: 'email wajib' });
+    var codes = loadJson(BAL_CODES, {});
+    var userCodes = {};
+    for (var code in codes) {
+        if (codes[code].createdBy === email) {
+            userCodes[code] = codes[code];
+        }
+    }
+    res.json({ codes: userCodes });
+});
+
 // List kode saldo (Owner)
 app.get('/api/balance/codes', function(req, res) {
     if (req.query.owner_key !== OWNER_KEY) return res.status(403).json({ error: 'Bukan Owner!' });
@@ -325,9 +340,21 @@ app.post('/api/owner/create-balance-code', function(req, res) {
     var { email, amount, count } = req.body;
     if (!email) return res.status(400).json({ error: 'email wajib' });
     var user = users[email];
-    if (!user || user.accountType !== 'owner')
-        return res.status(403).json({ error: 'Bukan Owner!' });
+    if (!user) return res.status(404).json({ error: 'User tidak ditemukan!' });
     if (!amount || amount <= 0) return res.status(400).json({ error: 'Nominal wajib' });
+
+    // Cek saldo — semua akun bisa buat kode asal punya saldo
+    var totalAmount = parseInt(amount) * Math.min(parseInt(count)||1, 100);
+    var userBalance = user.balance || 0;
+    if (userBalance < totalAmount) {
+        return res.status(402).json({
+            error: 'Saldo tidak cukup! Butuh Rp ' + totalAmount + ', saldo kamu Rp ' + userBalance
+        });
+    }
+
+    // Kurangi saldo user
+    user.balance = userBalance - totalAmount;
+    saveJson(USERS_FILE, users);
 
     var n     = Math.min(parseInt(count)||1, 100);
     var codes = loadJson(BAL_CODES, {});  // Append ke kode yang sudah ada
@@ -339,7 +366,7 @@ app.post('/api/owner/create-balance-code', function(req, res) {
             if (j === 4 || j === 8) code += '-';
             code += chars[Math.floor(Math.random()*chars.length)];
         }
-        codes[code] = { amount:parseInt(amount), used:false, usedBy:null, createdAt:new Date().toISOString() };
+        codes[code] = { amount:parseInt(amount), used:false, usedBy:null, createdBy:email, createdAt:new Date().toISOString() };
         generated.push({ code, amount:parseInt(amount) });
     }
     saveJson(BAL_CODES, codes);
